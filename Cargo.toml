@@ -106,16 +106,15 @@ rodio = { version = "0.21", default-features = false, features = [
 # Pinned to PR #849 (add-markdown-text-effects) for the `{big}…{/big}` inline
 # text-effect syntax (Inline::Effect). Drop the rev once it merges to master.
 whitenoise-markdown = { git = "https://github.com/marmot-protocol/whitenoise-rs", rev = "973f3ab65bf410c35e401935cdf4374b77770901" }
-marmot-app = { git = "https://github.com/marmot-protocol/mdk.git", branch = "master", features = [
+marmot-app = { path = "../mdk/crates/marmot-app", features = [
   "otlp-export",
 ] }
-marmot-account = { git = "https://github.com/marmot-protocol/mdk.git", branch = "master" }
-cgka-traits = { git = "https://github.com/marmot-protocol/mdk.git", branch = "master" }
+marmot-account = { path = "../mdk/crates/marmot-account" }
+cgka-traits = { path = "../mdk/crates/traits" }
 # Decode + inspect fetched MLS KeyPackages for the developer-mode KP viewer.
-# Pinned to the exact versions/features mdk's workspace uses so cargo unifies
-# on one openmls instance (see `Backend::debug_contact_key_packages`).
-openmls = { version = "~0.8.1", features = ["extensions-draft-08"] }
-openmls_rust_crypto = "0.5.1"
+# Local fork with init_keypair setter for vault-backed HPKE.
+openmls = { path = "../openmls/openmls", features = ["extensions-draft-08"] }
+openmls_rust_crypto = { path = "../openmls/openmls_rust_crypto" }
 tls_codec = "0.4.2"
 
 [build-dependencies]
