@@ -207,6 +207,27 @@ impl Vault {
         Ok(v)
     }
 
+    /// Create a vault pre-seeded with secrets, using the standard vault path
+    /// and a random key. Used by the `DM_MNEMONIC` dev path to bypass the
+    /// password-locked login screen. The vault persists to `$DM_HOME/vault.db`
+    /// so marmot's `VaultSecretStore` can write account secrets through it.
+    pub fn ephemeral(secrets: Vec<(&str, String)>) -> Self {
+        let mut data = BTreeMap::new();
+        for (k, v) in secrets {
+            data.insert(k.to_string(), v);
+        }
+        let mut key = [0u8; 32];
+        let mut salt = [0u8; SALT_LEN];
+        getrandom::getrandom(&mut key).expect("rng for ephemeral vault key");
+        getrandom::getrandom(&mut salt).expect("rng for ephemeral vault salt");
+        Vault {
+            path: vault_path(),
+            key: Zeroizing::new(key),
+            salt,
+            data,
+        }
+    }
+
     /// Open and decrypt the default vault (`$DM_HOME/vault.db`) with `password`.
     pub fn open(password: &str) -> Result<Self, VaultError> {
         Self::open_path(&vault_path(), password)

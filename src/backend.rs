@@ -24,9 +24,10 @@ pub(crate) use marmot_app::{
     AccountRelayListBootstrap, AccountSetupRequest, AppBlobEndpoint, AppGroupMemberRecord,
     AppGroupMlsState, AppGroupRecord, AppGroupSystemEvent, AppMessageQuery, AppMessageRecord,
     AuditLogFile, AuditLogSettings, AuditLogTrackerConfig, AuditLogUploadSource,
-    DEFAULT_BLOSSOM_SERVER_URL, MarmotApp, MarmotAppRuntime, MediaAttachmentReference,
-    MediaDownloadResult, MediaUploadAttachmentRequest, MediaUploadRequest, MediaUploadResult,
-    RelayTelemetryResource, RelayTelemetryRuntimeConfig, RelayTelemetrySettings,
+    DEFAULT_BLOSSOM_SERVER_URL, MarmotApp, MarmotAppConfig, MarmotAppRuntime,
+    MediaAttachmentReference, MediaDownloadResult, MediaUploadAttachmentRequest,
+    MediaUploadRequest, MediaUploadResult, RelayTelemetryResource,
+    RelayTelemetryRuntimeConfig, RelayTelemetrySettings,
     RuntimeMessageUpdate, RuntimeMessagesSubscription, SendSummary, UserDirectoryRecord,
     UserProfileMetadata, group_system_event_from_message,
 };
@@ -119,10 +120,16 @@ pub const SAVED_MESSAGES_NAME: &str = "Saved Messages";
 /// official relays only (the ones the mobile apps publish to). Before release,
 /// re-add the broad public indexers (relay.ditto.pub, relay.primal.net,
 /// relay.damus.io, nos.lol) so discovery works beyond the whitenoise fleet.
+///
+/// When `DM_LOCAL_RELAY` is set (local testing), discovery uses only the
+/// configured relays — no external connections.
+#[cfg(not(debug_assertions))]
 const DISCOVERY_RELAYS: &[&str] = &[
     "wss://relay.eu.whitenoise.chat",
     "wss://relay.us.whitenoise.chat",
 ];
+#[cfg(debug_assertions)]
+const DISCOVERY_RELAYS: &[&str] = &[];
 
 /// Capture a helper command's stdout, trimmed. `None` on spawn failure or
 /// non-zero exit, so callers degrade the same way as an unreadable file.
@@ -182,6 +189,48 @@ fn host_device_model() -> Option<String> {
     Some(model.to_string())
 }
 
+/// Try to derive a Nostr identity and MLS signer from the `DM_MNEMONIC` +
+/// `DM_EMAIL` env vars. Returns `None` when either var is unset, letting
+/// the caller fall back to the stored nsec.
+pub fn keyvault_identity() -> Option<(
+    String,
+    Box<dyn cgka_traits::mls_signer::MlsSigner>,
+    Arc<dyn cgka_traits::HpkeVaultBackend>,
+)> {
+    use nostr::nips::nip19::ToBech32;
+
+    let mnemonic = std::env::var("DM_MNEMONIC").ok()?;
+    let email = std::env::var("DM_EMAIL").ok()?;
+    tracing::info!(target: "backend", "booting with keyvault-derived identity (email={email})");
+
+    let km = wn_kv_test::km_light::KmLight::new(&mnemonic, vec![email.clone()])
+        .expect("KmLight::new failed for DM_MNEMONIC");
+    let pubkeys = km.get_pubkeys();
+    let nostr_pk = pubkeys
+        .first()
+        .expect("KmLight must have at least one account");
+    let account_signer = km
+        .create_account_signer(nostr_pk, None)
+        .expect("create_account_signer failed");
+
+    // Export the raw secp256k1 secret and build a nostr nsec from it.
+    let seed = account_signer
+        .export_nostr_seed()
+        .expect("export_nostr_seed failed");
+    let secret_key = nostr::SecretKey::from_slice(&seed)
+        .expect("vault seed is not a valid secp256k1 secret");
+    let keys = nostr::Keys::new(secret_key);
+    let nsec = keys
+        .secret_key()
+        .to_bech32()
+        .expect("nsec bech32 encoding failed");
+
+    let mls_signer = account_signer.mls_signer();
+    let vault_backend: Arc<dyn cgka_traits::HpkeVaultBackend> =
+        Arc::new(account_signer.mls_signer());
+    Some((nsec, Box::new(mls_signer), vault_backend))
+}
+
 pub struct Backend {
     tokio: TokioRuntime,
     app: MarmotApp,
@@ -236,6 +285,8 @@ impl Backend {
         active_account: Option<String>,
         on_synced: impl FnOnce(Result<()>) + Send + 'static,
         on_status: Option<StatusCallback>,
+        mls_signer: Option<Box<dyn cgka_traits::mls_signer::MlsSigner>>,
+        vault_backend: Option<Arc<dyn cgka_traits::HpkeVaultBackend>>,
     ) -> Result<Self> {
         let status = |msg: &str| {
             if let Some(ref cb) = on_status {
@@ -258,8 +309,20 @@ impl Backend {
             .build()
             .context("build tokio runtime")?;
 
-        let app =
-            MarmotApp::with_relays_and_account_home(&home, relays.clone(), account_home.clone());
+        let config = MarmotAppConfig::default()
+            .with_allow_loopback_relay_endpoints(cfg!(debug_assertions));
+        let app = MarmotApp::with_relays_and_account_home_and_config(
+            &home,
+            relays.clone(),
+            account_home.clone(),
+            config,
+        );
+        if let Some(signer) = mls_signer {
+            app.set_mls_signer(signer);
+        }
+        if let Some(vault) = vault_backend {
+            app.set_vault_backend(vault);
+        }
         let runtime = app.runtime();
 
         // Whether this identity already exists locally decides the boot

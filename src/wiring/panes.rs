@@ -367,11 +367,25 @@ pub(crate) fn wire_panes(
         }
     });
 
-    // There is no silent auto-login anymore: secrets live in a password-encrypted
-    // vault. If a vault exists, open on the Unlock screen (mode 3); otherwise the
-    // first-run "choose" screen (mode 0). The vault is only decrypted once the
-    // user supplies the password.
-    if vault::exists() {
+    // When DM_MNEMONIC + DM_EMAIL are set, bypass the login screen entirely:
+    // derive the nsec from the keyvault and boot straight to the app. The
+    // ephemeral vault is never persisted — the mnemonic IS the secret.
+    if let Some((kv_nsec, _signer, _vault)) = backend::keyvault_identity() {
+        let vault = Arc::new(Mutex::new(Vault::ephemeral(vec![
+            (vault::NSEC_KEY, kv_nsec.clone()),
+        ])));
+        ui.set_logged_in(true);
+        if let Ok(keys) = Keys::parse(&kv_nsec) {
+            let npub = keys.public_key().to_bech32().unwrap();
+            ui.set_my_qr(qr_image(&deeplink::profile_qr_url(&npub)));
+            ui.set_my_npub(npub.into());
+        }
+        boot_backend(kv_nsec, vault, None);
+    } else if vault::exists() {
+        // There is no silent auto-login anymore: secrets live in a
+        // password-encrypted vault. If a vault exists, open on the Unlock
+        // screen (mode 3); otherwise the first-run "choose" screen (mode 0).
+        // The vault is only decrypted once the user supplies the password.
         ui.set_login_mode(3);
     } else {
         ui.set_login_mode(0);

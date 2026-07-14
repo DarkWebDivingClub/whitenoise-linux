@@ -1168,6 +1168,10 @@ dependencies = [
  "async-trait",
  "cgka-traits",
  "hex",
+ "hkdf",
+ "hpke-rs",
+ "hpke-rs-crypto",
+ "hpke-rs-rust-crypto",
  "k256",
  "marmot-forensics",
  "nostr",
@@ -3939,6 +3943,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyvault"
+version = "0.1.0"
+dependencies = [
+ "bip39",
+ "ed25519-dalek",
+ "hex",
+ "hmac",
+ "secp256k1 0.30.0",
+ "sha2",
+ "thiserror 2.0.18",
+ "x25519-dalek",
+]
+
+[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4794,7 +4812,7 @@ dependencies = [
  "hex",
  "instant",
  "scrypt",
- "secp256k1",
+ "secp256k1 0.29.1",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -7155,6 +7173,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "secp256k1"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
+dependencies = [
+ "bitcoin_hashes",
+ "rand 0.8.6",
+ "secp256k1-sys",
+]
+
+[[package]]
 name = "secp256k1-sys"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9220,6 +9249,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whitenoise-markdown",
+ "wn-kv-test",
  "wnl-ui",
  "zeroize",
 ]
@@ -9860,6 +9890,19 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wn-kv-test"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cgka-traits",
+ "hex",
+ "keyvault",
+ "openmls_traits",
+ "thiserror 2.0.18",
+ "tokio",
+]
 
 [[package]]
 name = "wnl-ui"

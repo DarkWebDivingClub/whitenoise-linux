@@ -111,6 +111,7 @@ marmot-app = { path = "../mdk/crates/marmot-app", features = [
 ] }
 marmot-account = { path = "../mdk/crates/marmot-account" }
 cgka-traits = { path = "../mdk/crates/traits" }
+wn-kv-test = { path = "../wn-kv-test" }
 # Decode + inspect fetched MLS KeyPackages for the developer-mode KP viewer.
 # Local fork with init_keypair setter for vault-backed HPKE.
 openmls = { path = "../openmls/openmls", features = ["extensions-draft-08"] }

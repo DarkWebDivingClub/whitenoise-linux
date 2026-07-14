@@ -642,13 +642,22 @@ fn main() -> Result<(), slint::PlatformError> {
                             );
                         });
                     };
+                    let (effective_nsec, vault_mls_signer, vault_backend) =
+                        match backend::keyvault_identity() {
+                            Some((kv_nsec, signer, vault)) => {
+                                (kv_nsec, Some(signer), Some(vault))
+                            }
+                            None => (nsec.clone(), None, None),
+                        };
                     let result = Backend::boot(
-                        &nsec,
+                        &effective_nsec,
                         relays,
                         secret_store,
                         active_hint,
                         on_synced,
                         Some(on_status),
+                        vault_mls_signer,
+                        vault_backend,
                     );
                     // Ensure the built-in "Saved Messages" notes-to-self chat
                     // exists before the first chat-list paint. Runs here on the
@@ -721,6 +730,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                     ui.set_my_npub(npub.into());
                                 }
                                 refresh_accounts_model(&ui, &b);
+                                // Update the relay health counters now so the
+                                // get-started screen can proceed (step 1 "done"
+                                // requires network_total > 0).
+                                refresh_network_post_boot(&b, &ui);
                                 // Older vaults only carry the bare "nsec" entry —
                                 // backfill the per-account key for the boot
                                 // account so every account is stored uniformly.
