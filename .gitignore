@@ -11,3 +11,11 @@
 # that repo, not here — see its README. A plain `cargo build` ignores them
 # until the harness stages them.
 /src/bin/
+
+# dpkg-buildpackage artifacts
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/whitenoise-linux.substvars
+/debian/whitenoise-linux/
+/assets/whitenoise-linux-*.png
