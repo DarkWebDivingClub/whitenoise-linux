@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release
+	# Render icon PNGs from SVG
+	for size in 48 128 256; do \
+		rsvg-convert -w $$size -h $$size \
+			assets/svg/logo.svg \
+			-o assets/whitenoise-linux-$${size}.png; \
+	done
+
+override_dh_auto_install:
+	install -D -m 755 target/release/whitenoise-linux \
+		debian/whitenoise-linux/usr/bin/whitenoise-linux
+	install -D -m 644 assets/whitenoise-linux.desktop \
+		debian/whitenoise-linux/usr/share/applications/whitenoise-linux.desktop
+	# Icons
+	for size in 48 128 256; do \
+		install -D -m 644 \
+			assets/whitenoise-linux-$${size}.png \
+			debian/whitenoise-linux/usr/share/icons/hicolor/$${size}x$${size}/apps/whitenoise-linux.png; \
+	done
+	install -D -m 644 assets/svg/logo.svg \
+		debian/whitenoise-linux/usr/share/icons/hicolor/scalable/apps/whitenoise-linux.svg
+
+override_dh_auto_test:
+	# Tests require relay infrastructure

@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: whitenoise-linux
+Upstream-Contact: Rene Malmgren <duke_h3@dwdc.club>
+
+Files: *
+Copyright: 2025-2026 Rene Malmgren <duke_h3@dwdc.club>
+License: AGPL-3.0-or-later

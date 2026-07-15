@@ -1,0 +1,5 @@
+whitenoise-linux (0.1.0) stable; urgency=medium
+
+  * Initial Debian package.
+
+ -- Rene Malmgren <duke_h3@dwdc.club>  Mon, 14 Jul 2026 22:00:00 +0400

@@ -1,0 +1,19 @@
+Source: whitenoise-linux
+Section: net
+Priority: optional
+Maintainer: Rene Malmgren <duke_h3@dwdc.club>
+Build-Depends: debhelper-compat (= 13), cargo, rustc,
+ pkg-config, libmpv-dev, libfontconfig-dev,
+ libasound2-dev, libdbus-1-dev, librsvg2-bin
+Standards-Version: 4.6.2
+
+Package: whitenoise-linux
+Architecture: amd64
+Depends: ${misc:Depends}, ${shlibs:Depends},
+ libmpv2 | libmpv-dev, libfontconfig1, libasound2t64 | libasound2,
+ libdbus-1-3
+Description: End-to-end encrypted group chat over Nostr
+ Secure messaging desktop application using MLS protocol
+ for group key agreement and Nostr relays for transport.
+ Features voice messages, media sharing, emoji, and
+ multi-account support.
