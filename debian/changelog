@@ -1,3 +1,11 @@
+whitenoise-linux (0.1.0-dwdc.2) stable; urgency=medium
+
+  * Sync forks with upstream (openmls v0.8.1, mdk, whitenoise-linux).
+  * Vault-backed HPKE key derivation from BIP-39 seed phrase.
+  * Add user and developer getting-started guides.
+
+ -- Rene Malmgren <duke_h3@dwdc.club>  Sat, 19 Jul 2026 01:00:00 +0400
+
 whitenoise-linux (0.1.0) stable; urgency=medium
 
   * Initial Debian package.
