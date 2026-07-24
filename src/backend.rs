@@ -189,46 +189,24 @@ fn host_device_model() -> Option<String> {
     Some(model.to_string())
 }
 
-/// Try to derive a Nostr identity and MLS signer from the `DM_MNEMONIC` +
-/// `DM_EMAIL` env vars. Returns `None` when either var is unset, letting
-/// the caller fall back to the stored nsec.
-pub fn keyvault_identity() -> Option<(
-    String,
-    Box<dyn cgka_traits::mls_signer::MlsSigner>,
-    Arc<dyn cgka_traits::HpkeVaultBackend>,
-)> {
-    use nostr::nips::nip19::ToBech32;
-
-    let mnemonic = std::env::var("DM_MNEMONIC").ok()?;
-    let email = std::env::var("DM_EMAIL").ok()?;
-    tracing::info!(target: "backend", "booting with keyvault-derived identity (email={email})");
-
-    let km = wn_kv_test::km_light::KmLight::new(&mnemonic, vec![email.clone()])
-        .expect("KmLight::new failed for DM_MNEMONIC");
-    let pubkeys = km.get_pubkeys();
-    let nostr_pk = pubkeys
-        .first()
-        .expect("KmLight must have at least one account");
-    let account_signer = km
-        .create_account_signer(nostr_pk, None)
-        .expect("create_account_signer failed");
-
-    // Export the raw secp256k1 secret and build a nostr nsec from it.
-    let seed = account_signer
-        .export_nostr_seed()
-        .expect("export_nostr_seed failed");
-    let secret_key = nostr::SecretKey::from_slice(&seed)
-        .expect("vault seed is not a valid secp256k1 secret");
-    let keys = nostr::Keys::new(secret_key);
-    let nsec = keys
-        .secret_key()
-        .to_bech32()
-        .expect("nsec bech32 encoding failed");
-
-    let mls_signer = account_signer.mls_signer();
-    let vault_backend: Arc<dyn cgka_traits::HpkeVaultBackend> =
-        Arc::new(account_signer.mls_signer());
-    Some((nsec, Box::new(mls_signer), vault_backend))
+/// Try to build a `KeyManager` from the `DM_MNEMONIC` + `DM_EMAILS`/`DM_EMAIL`
+/// env vars. Returns `None` when the vars are unset, letting the caller fall
+/// back to the stored nsec.
+///
+/// No private key material crosses the vault boundary — the KeyManager provides
+/// signers that keep secrets inside the BIP-32 vault.
+pub fn keyvault_identity() -> Option<wn_kv_core::KeyManager> {
+    match wn_kv_core::KeyManager::new() {
+        Ok(km) => {
+            tracing::info!(
+                target: "backend",
+                "booting with keyvault-derived identity ({} account(s))",
+                km.get_identities().len(),
+            );
+            Some(km)
+        }
+        Err(_) => None,
+    }
 }
 
 pub struct Backend {
@@ -285,8 +263,7 @@ impl Backend {
         active_account: Option<String>,
         on_synced: impl FnOnce(Result<()>) + Send + 'static,
         on_status: Option<StatusCallback>,
-        mls_signer: Option<Box<dyn cgka_traits::mls_signer::MlsSigner>>,
-        vault_backend: Option<Arc<dyn cgka_traits::HpkeVaultBackend>>,
+        km: Option<wn_kv_core::KeyManager>,
     ) -> Result<Self> {
         let status = |msg: &str| {
             if let Some(ref cb) = on_status {
@@ -301,8 +278,18 @@ impl Backend {
         // Account secrets are sealed in the password-encrypted vault (see vault.rs)
         // via this injected store — never libsecret or plaintext JSON.
         let account_home = AccountHome::open_with_secret_store(&home, secret_store);
-        let target_id =
-            AccountHome::account_id_for_secret(nsec).context("derive account id from nsec")?;
+
+        // Derive the target account id. With a KeyManager the pubkey IS the
+        // identity — no nsec export needed. Without, derive from the nsec.
+        let target_id = if let Some(ref km) = km {
+            let pubkeys = km.get_identities();
+            let pubkey = pubkeys
+                .first()
+                .expect("KeyManager must have at least one identity");
+            hex::encode(pubkey)
+        } else {
+            AccountHome::account_id_for_secret(nsec).context("derive account id from nsec")?
+        };
 
         let tokio = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -317,11 +304,20 @@ impl Backend {
             account_home.clone(),
             config,
         );
-        if let Some(signer) = mls_signer {
-            app.set_mls_signer(signer);
-        }
-        if let Some(vault) = vault_backend {
-            app.set_vault_backend(vault);
+
+        // Install per-account vault-backed signers when a KeyManager is
+        // available — private key material never leaves the vault.
+        if let Some(ref km) = km {
+            for pubkey in km.get_identities() {
+                let hex_id = hex::encode(pubkey);
+                if let Ok(signer) = km.get_signer(&pubkey) {
+                    let mls = signer.mls_signer();
+                    let vault: Arc<dyn cgka_traits::HpkeVaultBackend> =
+                        Arc::new(signer.mls_signer());
+                    app.set_mls_signer_for_account(&hex_id, Box::new(mls));
+                    app.set_vault_backend_for_account(&hex_id, vault);
+                }
+            }
         }
         let runtime = app.runtime();
 
@@ -354,7 +350,11 @@ impl Backend {
                 target: "boot_timing", "first-run start done at {:?}",
                 t_boot.elapsed()
             );
-            Self::login_account(tokio.handle(), &runtime, nsec, &relays)?;
+            if let Some(ref km) = km {
+                Self::login_external_signer_account(tokio.handle(), &runtime, km, &relays)?;
+            } else {
+                Self::login_account(tokio.handle(), &runtime, nsec, &relays)?;
+            }
             tracing::debug!(
                 target: "boot_timing", "first-run login done at {:?}",
                 t_boot.elapsed()
@@ -437,6 +437,7 @@ impl Backend {
             nsec.to_string(),
             /* needs_start */ already_present,
             on_synced,
+            km.is_some(),
         );
 
         status("Connecting to relays…");
@@ -467,6 +468,7 @@ impl Backend {
         nsec: String,
         needs_start: bool,
         on_synced: impl FnOnce(Result<()>) + Send + 'static,
+        use_external_signer: bool,
     ) {
         let handle = self.tokio.handle().clone();
         let runtime = self.runtime.clone();
@@ -484,10 +486,28 @@ impl Backend {
                         t_sync.elapsed()
                     );
                     if wiped {
-                        // The wipe removed our account — re-import it. The
-                        // account id is derived from the nsec, so the summary
-                        // the Backend resolved at boot stays valid.
-                        Self::login_account(&handle, &runtime, &nsec, &relays)?;
+                        // The wipe removed our account — re-import it.
+                        if use_external_signer {
+                            // Re-create the KeyManager from env vars and
+                            // re-register per-account signers + login.
+                            let km = wn_kv_core::KeyManager::new()
+                                .map_err(|e| anyhow!("KeyManager::new on re-login: {e}"))?;
+                            for pubkey in km.get_identities() {
+                                let hex_id = hex::encode(pubkey);
+                                if let Ok(signer) = km.get_signer(&pubkey) {
+                                    let mls = signer.mls_signer();
+                                    let vault: Arc<dyn cgka_traits::HpkeVaultBackend> =
+                                        Arc::new(signer.mls_signer());
+                                    app.set_mls_signer_for_account(&hex_id, Box::new(mls));
+                                    app.set_vault_backend_for_account(&hex_id, vault);
+                                }
+                            }
+                            Self::login_external_signer_account(
+                                &handle, &runtime, &km, &relays,
+                            )?;
+                        } else {
+                            Self::login_account(&handle, &runtime, &nsec, &relays)?;
+                        }
                     }
                 }
                 let has_kp = app
@@ -682,6 +702,35 @@ impl Backend {
         Ok(())
     }
 
+    /// Import (or re-import) accounts using the external-signer path.
+    /// No private key material crosses the vault boundary — the signer
+    /// performs all Schnorr + Ed25519 operations in-vault.
+    fn login_external_signer_account(
+        tokio: &tokio::runtime::Handle,
+        runtime: &MarmotAppRuntime,
+        km: &wn_kv_core::KeyManager,
+        relays: &[String],
+    ) -> Result<()> {
+        let pubkeys = km.get_identities();
+        anyhow::ensure!(!pubkeys.is_empty(), "KeyManager has no identities");
+        for pubkey in &pubkeys {
+            let hex_id = hex::encode(pubkey);
+            let signer = km
+                .get_signer(pubkey)
+                .map_err(|e| anyhow!("get_signer: {e}"))?;
+            let request = Self::account_setup_request(relays);
+            let runtime_for_login = runtime.clone();
+            tokio
+                .block_on(async move {
+                    runtime_for_login
+                        .login_external_signer(hex_id, signer, request)
+                        .await
+                })
+                .context("runtime.login_external_signer")?;
+        }
+        Ok(())
+    }
+
     /// Snapshot of the currently-displayed account.
     pub fn account(&self) -> AccountSummary {
         self.active.read().unwrap().clone()
@@ -697,14 +746,15 @@ impl Backend {
         self.active.read().unwrap().account_id_hex.clone()
     }
 
-    /// All local-signing accounts in the home, in storage order. Every one of
-    /// these has (or is getting) a running background worker.
+    /// All signing accounts (local or external) in the home, in storage
+    /// order. Every one of these has (or is getting) a running background
+    /// worker.
     pub fn accounts(&self) -> Vec<AccountSummary> {
         self.account_home
             .accounts()
             .unwrap_or_default()
             .into_iter()
-            .filter(|a| a.local_signing)
+            .filter(|a| a.is_active_signing())
             .collect()
     }
 

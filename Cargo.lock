@@ -9250,7 +9250,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "whitenoise-markdown",
- "wn-kv-test",
+ "wn-kv-core",
  "wnl-ui",
  "zeroize",
 ]
@@ -9893,14 +9893,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
-name = "wn-kv-test"
-version = "0.1.0"
+name = "wn-kv-core"
+version = "0.2.0-dev"
 dependencies = [
  "async-trait",
+ "base64",
+ "cgka-engine",
  "cgka-traits",
  "hex",
+ "hmac",
  "keyvault",
+ "nostr",
  "openmls_traits",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
 ]
