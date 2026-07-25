@@ -189,24 +189,11 @@ fn host_device_model() -> Option<String> {
     Some(model.to_string())
 }
 
-/// Try to build a `KeyManager` from the `DM_MNEMONIC` + `DM_EMAILS`/`DM_EMAIL`
-/// env vars. Returns `None` when the vars are unset, letting the caller fall
-/// back to the stored nsec.
-///
-/// No private key material crosses the vault boundary — the KeyManager provides
-/// signers that keep secrets inside the BIP-32 vault.
-pub fn keyvault_identity() -> Option<wn_kv_core::KeyManager> {
-    match wn_kv_core::KeyManager::new() {
-        Ok(km) => {
-            tracing::info!(
-                target: "backend",
-                "booting with keyvault-derived identity ({} account(s))",
-                km.get_identities().len(),
-            );
-            Some(km)
-        }
-        Err(_) => None,
-    }
+/// Check whether a signing-agent daemon socket is configured via the
+/// `NOSTR_SA_SOCK` env var. Returns `Some(path)` when the var is set,
+/// `None` otherwise — letting the caller fall back to the stored nsec.
+pub fn daemon_socket() -> Option<String> {
+    std::env::var("NOSTR_SA_SOCK").ok()
 }
 
 pub struct Backend {
@@ -263,7 +250,7 @@ impl Backend {
         active_account: Option<String>,
         on_synced: impl FnOnce(Result<()>) + Send + 'static,
         on_status: Option<StatusCallback>,
-        km: Option<wn_kv_core::KeyManager>,
+        sa_sock: Option<String>,
     ) -> Result<Self> {
         let status = |msg: &str| {
             if let Some(ref cb) = on_status {
@@ -279,22 +266,37 @@ impl Backend {
         // via this injected store — never libsecret or plaintext JSON.
         let account_home = AccountHome::open_with_secret_store(&home, secret_store);
 
-        // Derive the target account id. With a KeyManager the pubkey IS the
-        // identity — no nsec export needed. Without, derive from the nsec.
-        let target_id = if let Some(ref km) = km {
-            let pubkeys = km.get_identities();
-            let pubkey = pubkeys
-                .first()
-                .expect("KeyManager must have at least one identity");
-            hex::encode(pubkey)
-        } else {
-            AccountHome::account_id_for_secret(nsec).context("derive account id from nsec")?
-        };
-
         let tokio = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .context("build tokio runtime")?;
+
+        // Connect to the signing-agent daemon when NOSTR_SA_SOCK is set.
+        // The daemon holds all key material; we only get public keys back.
+        let sa_client: Option<Arc<sa_client::SaClient>> = match sa_sock.as_deref() {
+            Some(path) => {
+                let client = tokio.block_on(sa_client::SaClient::connect(path))
+                    .map_err(|e| anyhow!("sa-daemon connect({}): {e}", path))?;
+                Some(Arc::new(client))
+            }
+            None => None,
+        };
+
+        // Derive the target account id. With a daemon the pubkey IS the
+        // identity — no nsec export needed. Without, derive from the nsec.
+        /// Ciphersuite constant: MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519.
+        const CS: u16 = 0x0001;
+        let target_id = if let Some(ref client) = sa_client {
+            let pubkeys = tokio
+                .block_on(client.get_public_keys())
+                .map_err(|e| anyhow!("get_public_keys: {e}"))?;
+            let pubkey = pubkeys
+                .first()
+                .ok_or_else(|| anyhow!("daemon has no identities"))?;
+            hex::encode(pubkey)
+        } else {
+            AccountHome::account_id_for_secret(nsec).context("derive account id from nsec")?
+        };
 
         let config = MarmotAppConfig::default()
             .with_allow_loopback_relay_endpoints(cfg!(debug_assertions));
@@ -305,18 +307,21 @@ impl Backend {
             config,
         );
 
-        // Install per-account vault-backed signers when a KeyManager is
-        // available — private key material never leaves the vault.
-        if let Some(ref km) = km {
-            for pubkey in km.get_identities() {
+        // Install per-account daemon-backed signers when an sa-client is
+        // available — private key material never leaves the daemon process.
+        if let Some(ref client) = sa_client {
+            let pubkeys = tokio
+                .block_on(client.get_public_keys())
+                .map_err(|e| anyhow!("get_public_keys: {e}"))?;
+            for pubkey in &pubkeys {
                 let hex_id = hex::encode(pubkey);
-                if let Ok(signer) = km.get_signer(&pubkey) {
-                    let mls = signer.mls_signer();
-                    let vault: Arc<dyn cgka_traits::HpkeVaultBackend> =
-                        Arc::new(signer.mls_signer());
-                    app.set_mls_signer_for_account(&hex_id, Box::new(mls));
-                    app.set_vault_backend_for_account(&hex_id, vault);
-                }
+                let mls_pk = tokio
+                    .block_on(client.get_mls_pubkey(pubkey, None, CS))
+                    .map_err(|e| anyhow!("get_mls_pubkey({}): {e}", hex_id))?;
+                let mls_signer = sa_client::SaMlsSigner::new(Arc::clone(client), mls_pk);
+                let hpke = sa_client::SaHpkeBackend::new(Arc::clone(client), mls_pk);
+                app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
+                app.set_vault_backend_for_account(&hex_id, Arc::new(hpke));
             }
         }
         let runtime = app.runtime();
@@ -350,8 +355,8 @@ impl Backend {
                 target: "boot_timing", "first-run start done at {:?}",
                 t_boot.elapsed()
             );
-            if let Some(ref km) = km {
-                Self::login_external_signer_account(tokio.handle(), &runtime, km, &relays)?;
+            if let Some(ref client) = sa_client {
+                Self::login_external_signer_account(tokio.handle(), &runtime, client, &relays)?;
             } else {
                 Self::login_account(tokio.handle(), &runtime, nsec, &relays)?;
             }
@@ -437,7 +442,7 @@ impl Backend {
             nsec.to_string(),
             /* needs_start */ already_present,
             on_synced,
-            km.is_some(),
+            sa_sock,
         );
 
         status("Connecting to relays…");
@@ -468,7 +473,7 @@ impl Backend {
         nsec: String,
         needs_start: bool,
         on_synced: impl FnOnce(Result<()>) + Send + 'static,
-        use_external_signer: bool,
+        sa_sock: Option<String>,
     ) {
         let handle = self.tokio.handle().clone();
         let runtime = self.runtime.clone();
@@ -487,23 +492,32 @@ impl Backend {
                     );
                     if wiped {
                         // The wipe removed our account — re-import it.
-                        if use_external_signer {
-                            // Re-create the KeyManager from env vars and
-                            // re-register per-account signers + login.
-                            let km = wn_kv_core::KeyManager::new()
-                                .map_err(|e| anyhow!("KeyManager::new on re-login: {e}"))?;
-                            for pubkey in km.get_identities() {
+                        if let Some(ref sock) = sa_sock {
+                            // Reconnect to the daemon and re-register
+                            // per-account signers + login.
+                            const CS: u16 = 0x0001;
+                            let client = Arc::new(
+                                handle
+                                    .block_on(sa_client::SaClient::connect(sock))
+                                    .map_err(|e| anyhow!("sa-daemon reconnect: {e}"))?,
+                            );
+                            let pubkeys = handle
+                                .block_on(client.get_public_keys())
+                                .map_err(|e| anyhow!("get_public_keys: {e}"))?;
+                            for pubkey in &pubkeys {
                                 let hex_id = hex::encode(pubkey);
-                                if let Ok(signer) = km.get_signer(&pubkey) {
-                                    let mls = signer.mls_signer();
-                                    let vault: Arc<dyn cgka_traits::HpkeVaultBackend> =
-                                        Arc::new(signer.mls_signer());
-                                    app.set_mls_signer_for_account(&hex_id, Box::new(mls));
-                                    app.set_vault_backend_for_account(&hex_id, vault);
-                                }
+                                let mls_pk = handle
+                                    .block_on(client.get_mls_pubkey(pubkey, None, CS))
+                                    .map_err(|e| anyhow!("get_mls_pubkey: {e}"))?;
+                                let mls_signer =
+                                    sa_client::SaMlsSigner::new(Arc::clone(&client), mls_pk);
+                                let hpke =
+                                    sa_client::SaHpkeBackend::new(Arc::clone(&client), mls_pk);
+                                app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
+                                app.set_vault_backend_for_account(&hex_id, Arc::new(hpke));
                             }
                             Self::login_external_signer_account(
-                                &handle, &runtime, &km, &relays,
+                                &handle, &runtime, &client, &relays,
                             )?;
                         } else {
                             Self::login_account(&handle, &runtime, &nsec, &relays)?;
@@ -702,22 +716,22 @@ impl Backend {
         Ok(())
     }
 
-    /// Import (or re-import) accounts using the external-signer path.
-    /// No private key material crosses the vault boundary — the signer
-    /// performs all Schnorr + Ed25519 operations in-vault.
+    /// Import (or re-import) accounts using the daemon-backed external-signer
+    /// path. No private key material leaves the daemon — the `SaAccountClient`
+    /// delegates all Schnorr + Ed25519 operations over the Unix socket.
     fn login_external_signer_account(
         tokio: &tokio::runtime::Handle,
         runtime: &MarmotAppRuntime,
-        km: &wn_kv_core::KeyManager,
+        client: &Arc<sa_client::SaClient>,
         relays: &[String],
     ) -> Result<()> {
-        let pubkeys = km.get_identities();
-        anyhow::ensure!(!pubkeys.is_empty(), "KeyManager has no identities");
+        let pubkeys = tokio
+            .block_on(client.get_public_keys())
+            .map_err(|e| anyhow!("get_public_keys: {e}"))?;
+        anyhow::ensure!(!pubkeys.is_empty(), "daemon has no identities");
         for pubkey in &pubkeys {
             let hex_id = hex::encode(pubkey);
-            let signer = km
-                .get_signer(pubkey)
-                .map_err(|e| anyhow!("get_signer: {e}"))?;
+            let signer = sa_client::SaAccountClient::new(Arc::clone(client), *pubkey);
             let request = Self::account_setup_request(relays);
             let runtime_for_login = runtime.clone();
             tokio

@@ -3943,20 +3943,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keyvault"
-version = "0.1.0"
-dependencies = [
- "bip39",
- "ed25519-dalek",
- "hex",
- "hmac",
- "secp256k1 0.30.0",
- "sha2",
- "thiserror 2.0.18",
- "x25519-dalek",
-]
-
-[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4812,7 +4798,7 @@ dependencies = [
  "hex",
  "instant",
  "scrypt",
- "secp256k1 0.29.1",
+ "secp256k1",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -7078,6 +7064,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "sa-client"
+version = "0.2.0-dev"
+dependencies = [
+ "cgka-engine",
+ "cgka-traits",
+ "hex",
+ "nostr",
+ "openmls_traits",
+ "sa-rpc-types",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "sa-rpc-types"
+version = "0.2.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7170,17 +7179,6 @@ dependencies = [
  "rand 0.8.6",
  "secp256k1-sys",
  "serde",
-]
-
-[[package]]
-name = "secp256k1"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
-dependencies = [
- "bitcoin_hashes",
- "rand 0.8.6",
- "secp256k1-sys",
 ]
 
 [[package]]
@@ -8248,6 +8246,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -9239,6 +9238,7 @@ dependencies = [
  "resvg 0.45.1",
  "rfd",
  "rodio",
+ "sa-client",
  "serde",
  "serde_json",
  "sha2",
@@ -9250,7 +9250,6 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "whitenoise-markdown",
- "wn-kv-core",
  "wnl-ui",
  "zeroize",
 ]
@@ -9891,24 +9890,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "wn-kv-core"
-version = "0.2.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "cgka-engine",
- "cgka-traits",
- "hex",
- "hmac",
- "keyvault",
- "nostr",
- "openmls_traits",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
-]
 
 [[package]]
 name = "wnl-ui"

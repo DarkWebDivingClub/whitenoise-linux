@@ -208,8 +208,8 @@ impl Vault {
     }
 
     /// Create a vault pre-seeded with secrets, using the standard vault path
-    /// and a random key. Used by the `DM_MNEMONIC` dev path to bypass the
-    /// password-locked login screen. The vault persists to `$DM_HOME/vault.db`
+    /// and a random key. Used by the daemon (`NOSTR_SA_SOCK`) path to bypass
+    /// the password-locked login screen. The vault persists to `$DM_HOME/vault.db`
     /// so marmot's `VaultSecretStore` can write account secrets through it.
     pub fn ephemeral(secrets: Vec<(&str, String)>) -> Self {
         let mut data = BTreeMap::new();
