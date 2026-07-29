@@ -1,3 +1,10 @@
+whitenoise-linux (0.1.0-dwdc.3) resolute; urgency=medium
+
+  * Wire sa-client into backend, replace in-process KeyManager.
+  * Fix APT repo setup and packaging convention in getting-started docs.
+
+ -- Rene Malmgren <duke_h3@dwdc.club>  Tue, 29 Jul 2026 01:00:00 +0400
+
 whitenoise-linux (0.1.0-dwdc.2) stable; urgency=medium
 
   * Sync forks with upstream (openmls v0.8.1, mdk, whitenoise-linux).
