@@ -642,22 +642,15 @@ fn main() -> Result<(), slint::PlatformError> {
                             );
                         });
                     };
-                    let (effective_nsec, vault_mls_signer, vault_backend) =
-                        match backend::keyvault_identity() {
-                            Some((kv_nsec, signer, vault)) => {
-                                (kv_nsec, Some(signer), Some(vault))
-                            }
-                            None => (nsec.clone(), None, None),
-                        };
+                    let sa_sock = backend::daemon_socket();
                     let result = Backend::boot(
-                        &effective_nsec,
+                        &nsec,
                         relays,
                         secret_store,
                         active_hint,
                         on_synced,
                         Some(on_status),
-                        vault_mls_signer,
-                        vault_backend,
+                        sa_sock,
                     );
                     // Ensure the built-in "Saved Messages" notes-to-self chat
                     // exists before the first chat-list paint. Runs here on the
