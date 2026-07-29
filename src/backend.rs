@@ -284,8 +284,6 @@ impl Backend {
 
         // Derive the target account id. With a daemon the pubkey IS the
         // identity — no nsec export needed. Without, derive from the nsec.
-        /// Ciphersuite constant: MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519.
-        const CS: u16 = 0x0001;
         let target_id = if let Some(ref client) = sa_client {
             let pubkeys = tokio
                 .block_on(client.get_public_keys())
@@ -316,7 +314,7 @@ impl Backend {
             for pubkey in &pubkeys {
                 let hex_id = hex::encode(pubkey);
                 let mls_pk = tokio
-                    .block_on(client.get_mls_pubkey(pubkey, None, CS))
+                    .block_on(client.get_mls_pubkey(pubkey, None))
                     .map_err(|e| anyhow!("get_mls_pubkey({}): {e}", hex_id))?;
                 let mls_signer = sa_client::SaMlsSigner::new(Arc::clone(client), mls_pk);
                 let hpke = sa_client::SaHpkeBackend::new(Arc::clone(client), mls_pk);
@@ -495,7 +493,6 @@ impl Backend {
                         if let Some(ref sock) = sa_sock {
                             // Reconnect to the daemon and re-register
                             // per-account signers + login.
-                            const CS: u16 = 0x0001;
                             let client = Arc::new(
                                 handle
                                     .block_on(sa_client::SaClient::connect(sock))
@@ -507,7 +504,7 @@ impl Backend {
                             for pubkey in &pubkeys {
                                 let hex_id = hex::encode(pubkey);
                                 let mls_pk = handle
-                                    .block_on(client.get_mls_pubkey(pubkey, None, CS))
+                                    .block_on(client.get_mls_pubkey(pubkey, None))
                                     .map_err(|e| anyhow!("get_mls_pubkey: {e}"))?;
                                 let mls_signer =
                                     sa_client::SaMlsSigner::new(Arc::clone(&client), mls_pk);

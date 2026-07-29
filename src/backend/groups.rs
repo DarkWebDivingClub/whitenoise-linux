@@ -541,9 +541,15 @@ impl Backend {
     /// tracking, which can lag the configured list briefly after boot.
     pub fn relay_health(&self) -> (usize, usize) {
         let plane = self.runtime.shared_services().relay_plane().clone();
-        let health = self
-            .tokio
-            .block_on(async move { plane.relay_health().await });
+        let fut = async move { plane.relay_health().await };
+        // Called from both sync (UI callbacks, timer threads) and async
+        // (send_text_async) contexts. A plain `Runtime::block_on` panics
+        // inside a tokio worker, so detect that and use block_in_place.
+        let health = if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.tokio.handle().block_on(fut))
+        } else {
+            self.tokio.block_on(fut)
+        };
         (health.connected, health.total_relays)
     }
 

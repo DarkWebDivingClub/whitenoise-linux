@@ -370,32 +370,43 @@ pub(crate) fn wire_panes(
     // When NOSTR_SA_SOCK is set, bypass the login screen entirely: the daemon
     // holds all key material and delegates signing over a Unix socket. The
     // ephemeral vault is never persisted — the daemon IS the secret store.
-    if let Some(ref sock) = backend::daemon_socket() {
+    // On failure (daemon unreachable, phone offline, timeout) fall through
+    // to the normal login screen instead of crashing.
+    let daemon_booted = if let Some(ref sock) = backend::daemon_socket() {
         // Quick blocking connect to discover the identity. Dropped before
         // boot_backend spawns its own tokio runtime.
-        let rt = tokio::runtime::Runtime::new().expect("quick runtime for daemon probe");
-        let client = rt
-            .block_on(sa_client::SaClient::connect(sock))
-            .expect("connect to sa-daemon");
-        let pubkeys = rt
-            .block_on(client.get_public_keys())
-            .expect("daemon get_public_keys");
-        let pubkey = pubkeys.first().expect("daemon has no identities");
-        let pubkey_hex = hex::encode(pubkey);
-        drop(rt);
-        // Empty ephemeral vault — no nsec to store. The external signer path
-        // doesn't need one; per-account secrets stay inside the daemon.
-        let vault = Arc::new(Mutex::new(Vault::ephemeral(vec![])));
-        ui.set_logged_in(true);
-        if let Ok(pk) = nostr::PublicKey::from_slice(pubkey) {
-            use nostr::nips::nip19::ToBech32;
-            let npub = pk.to_bech32().unwrap();
-            ui.set_my_qr(qr_image(&deeplink::profile_qr_url(&npub)));
-            ui.set_my_npub(npub.into());
-        }
-        // The pubkey hex is passed as a placeholder — Backend::boot() uses
-        // the daemon for identity, not the nsec string.
-        boot_backend(pubkey_hex, vault, None);
+        (|| -> Option<()> {
+            let rt = tokio::runtime::Runtime::new().ok()?;
+            let client = rt.block_on(sa_client::SaClient::connect(sock)).ok()?;
+            let pubkeys = rt.block_on(client.get_public_keys()).ok()?;
+            let pubkey = pubkeys.first()?;
+            let pubkey_hex = hex::encode(pubkey);
+            let pk_slice = *pubkey;
+            drop(rt);
+            // Empty ephemeral vault — no nsec to store. The external signer
+            // path doesn't need one; per-account secrets stay in the daemon.
+            let vault = Arc::new(Mutex::new(Vault::ephemeral(vec![])));
+            ui.set_logged_in(true);
+            if let Ok(pk) = nostr::PublicKey::from_slice(&pk_slice) {
+                use nostr::nips::nip19::ToBech32;
+                if let Ok(npub) = pk.to_bech32() {
+                    ui.set_my_qr(qr_image(&deeplink::profile_qr_url(&npub)));
+                    ui.set_my_npub(npub.into());
+                }
+            }
+            boot_backend(pubkey_hex, vault, None);
+            Some(())
+        })()
+        .is_some()
+    } else {
+        false
+    };
+    if !daemon_booted && backend::daemon_socket().is_some() {
+        tracing::warn!(target: "panes", "daemon probe failed — falling back to login screen");
+    }
+
+    if daemon_booted {
+        // Already booted above — skip the vault/login branches.
     } else if vault::exists() {
         // There is no silent auto-login anymore: secrets live in a
         // password-encrypted vault. If a vault exists, open on the Unlock
