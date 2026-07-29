@@ -12,7 +12,7 @@ or sent over the network.
 curl -fsSL https://apt.dwdc.club/dwdc-apt-repo.gpg \
   | sudo tee /usr/share/keyrings/dwdc-apt.gpg > /dev/null
 
-echo "deb [signed-by=/usr/share/keyrings/dwdc-apt.gpg] https://apt.dwdc.club alfa main" \
+echo "deb [signed-by=/usr/share/keyrings/dwdc-apt.gpg] https://apt.dwdc.club resolute alfa" \
   | sudo tee /etc/apt/sources.list.d/dwdc.list
 
 sudo apt update

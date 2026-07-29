@@ -284,12 +284,12 @@ The pre-commit hook enforces `cargo fmt` and `cargo clippy` gates.
 
 ## Building a .deb
 
-The `packaging/debian` branch carries Debian packaging on top of
-master:
+The `packaging/ubuntu/resolute` branch carries Debian packaging on
+top of master:
 
 ```bash
-git checkout packaging/debian
-dpkg-buildpackage -us -uc -b
+git checkout packaging/ubuntu/resolute
+dpkg-buildpackage -b -us -uc
 ```
 
 The `.deb` lands in the parent directory.
