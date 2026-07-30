@@ -1,4 +1,4 @@
-whitenoise-linux (0.1.0-dwdc.3) resolute; urgency=medium
+whitenoise-linux (0.1.0-dwdc.3+deb13) trixie; urgency=medium
 
   * Wire sa-client into backend, replace in-process KeyManager.
   * Fix APT repo setup and packaging convention in getting-started docs.
