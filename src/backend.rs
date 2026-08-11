@@ -316,7 +316,7 @@ impl Backend {
                 let mls_pk = tokio
                     .block_on(client.get_mls_pubkey(pubkey, None))
                     .map_err(|e| anyhow!("get_mls_pubkey({}): {e}", hex_id))?;
-                let mls_signer = sa_client::SaMlsSigner::new(Arc::clone(client), mls_pk);
+                let mls_signer = sa_client::SaMlsSigner::new(Arc::clone(client), *pubkey, mls_pk);
                 let hpke = sa_client::SaHpkeBackend::new(Arc::clone(client), mls_pk);
                 app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
                 app.set_vault_backend_for_account(&hex_id, Arc::new(hpke));
@@ -505,7 +505,7 @@ impl Backend {
                                 .block_on(client.get_mls_pubkey(pubkey, None))
                                 .map_err(|e| anyhow!("get_mls_pubkey: {e}"))?;
                             let mls_signer =
-                                sa_client::SaMlsSigner::new(Arc::clone(&client), mls_pk);
+                                sa_client::SaMlsSigner::new(Arc::clone(&client), *pubkey, mls_pk);
                             let hpke =
                                 sa_client::SaHpkeBackend::new(Arc::clone(&client), mls_pk);
                             app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
