@@ -518,6 +518,19 @@ pub(crate) fn push_contact_shared_groups(ui: &DarkMatterLinux, backend: &Backend
 /// No validation — the marmot runtime parses each entry and errors out on
 /// invalid input, which we surface back to the user.
 pub(crate) fn parse_member_list(raw: &str) -> Vec<String> {
+    // Fast path: a single npub/hex key pasted with copy-paste whitespace
+    // artifacts (line breaks, spaces).  Strip all whitespace and return it
+    // as one entry when the result looks like exactly one key.
+    let squashed: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    if !squashed.contains(',') && !squashed.contains(';') {
+        let looks_like_one = (squashed.starts_with("npub1") && squashed.len() == 63)
+            || (squashed.len() == 64 && squashed.chars().all(|c| c.is_ascii_hexdigit()));
+        if looks_like_one {
+            return vec![squashed];
+        }
+    }
+
+    // Multiple entries: split on whitespace, commas, semicolons.
     raw.split(|c: char| c.is_whitespace() || c == ',' || c == ';')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())

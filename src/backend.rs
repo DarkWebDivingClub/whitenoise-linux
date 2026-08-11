@@ -488,37 +488,54 @@ impl Backend {
                         target: "boot_timing", "background runtime.start done at {:?} (wiped={wiped})",
                         t_sync.elapsed()
                     );
-                    if wiped {
-                        // The wipe removed our account — re-import it.
-                        if let Some(ref sock) = sa_sock {
-                            // Reconnect to the daemon and re-register
-                            // per-account signers + login.
-                            let client = Arc::new(
-                                handle
-                                    .block_on(sa_client::SaClient::connect(sock))
-                                    .map_err(|e| anyhow!("sa-daemon reconnect: {e}"))?,
-                            );
-                            let pubkeys = handle
-                                .block_on(client.get_public_keys())
-                                .map_err(|e| anyhow!("get_public_keys: {e}"))?;
-                            for pubkey in &pubkeys {
-                                let hex_id = hex::encode(pubkey);
-                                let mls_pk = handle
-                                    .block_on(client.get_mls_pubkey(pubkey, None))
-                                    .map_err(|e| anyhow!("get_mls_pubkey: {e}"))?;
-                                let mls_signer =
-                                    sa_client::SaMlsSigner::new(Arc::clone(&client), mls_pk);
-                                let hpke =
-                                    sa_client::SaHpkeBackend::new(Arc::clone(&client), mls_pk);
-                                app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
-                                app.set_vault_backend_for_account(&hex_id, Arc::new(hpke));
-                            }
+                    if let Some(ref sock) = sa_sock {
+                        // Reconnect to the daemon and re-register
+                        // per-account signers.
+                        let client = Arc::new(
+                            handle
+                                .block_on(sa_client::SaClient::connect(sock))
+                                .map_err(|e| anyhow!("sa-daemon reconnect: {e}"))?,
+                        );
+                        let pubkeys = handle
+                            .block_on(client.get_public_keys())
+                            .map_err(|e| anyhow!("get_public_keys: {e}"))?;
+                        for pubkey in &pubkeys {
+                            let hex_id = hex::encode(pubkey);
+                            let mls_pk = handle
+                                .block_on(client.get_mls_pubkey(pubkey, None))
+                                .map_err(|e| anyhow!("get_mls_pubkey: {e}"))?;
+                            let mls_signer =
+                                sa_client::SaMlsSigner::new(Arc::clone(&client), mls_pk);
+                            let hpke =
+                                sa_client::SaHpkeBackend::new(Arc::clone(&client), mls_pk);
+                            app.set_mls_signer_for_account(&hex_id, Box::new(mls_signer));
+                            app.set_vault_backend_for_account(&hex_id, Arc::new(hpke));
+                        }
+                        if wiped {
+                            // The wipe removed our account — re-import it.
                             Self::login_external_signer_account(
                                 &handle, &runtime, &client, &relays,
                             )?;
                         } else {
-                            Self::login_account(&handle, &runtime, &nsec, &relays)?;
+                            // Account exists but the runtime lost its
+                            // external-signer registration (in-memory only).
+                            // Re-register so the account worker starts.
+                            for pubkey in &pubkeys {
+                                let hex_id = hex::encode(pubkey);
+                                let signer = sa_client::SaAccountClient::new(
+                                    Arc::clone(&client),
+                                    *pubkey,
+                                );
+                                let rt = runtime.clone();
+                                handle
+                                    .block_on(async move {
+                                        rt.register_external_signer(&hex_id, signer).await
+                                    })
+                                    .context("runtime.register_external_signer")?;
+                            }
                         }
+                    } else if wiped {
+                        Self::login_account(&handle, &runtime, &nsec, &relays)?;
                     }
                 }
                 let has_kp = app
