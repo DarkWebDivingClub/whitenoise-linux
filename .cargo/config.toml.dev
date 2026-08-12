@@ -1,0 +1,10 @@
+# Copy to .cargo/config.toml for local development with path overrides.
+# This file is a template -- .cargo/config.toml is gitignored.
+paths = [
+    "../openmls/openmls",
+    "../openmls/openmls_rust_crypto",
+    "../mdk/crates/marmot-app",
+    "../mdk/crates/marmot-account",
+    "../mdk/crates/traits",
+    "../wn-kv-test/crates/sa-client",
+]

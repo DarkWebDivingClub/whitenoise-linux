@@ -1,4 +1,7 @@
 /target
+
+# Local Cargo path overrides for development (see .cargo/config.toml.dev)
+.cargo/config.toml
 .stignore
 .syncthing.*
 *.sync-conflict*
